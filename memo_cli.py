@@ -16,7 +16,6 @@ import yaml
 
 DIM = 384
 MAX_K = 100
-DEFAULT_DB = "memo"
 
 
 @dataclass
@@ -291,6 +290,23 @@ def command_clean(db_base: str, user_cwd: str) -> int:
             "Database already empty "
             f"({index_path}, {yaml_path})"
         )
+    return 0
+
+
+def command_reindex(db_base: str, user_cwd: str, verbose: bool) -> int:
+    index_path, yaml_path = build_db_paths(db_base, user_cwd)
+
+    try:
+        texts, _ = load_yaml_tables(yaml_path)
+    except Exception as e:
+        print(f"Error: failed to load database YAML '{yaml_path}': {e}", file=sys.stderr)
+        return 1
+
+    index = rebuild_index_from_texts(texts, verbose)
+    ensure_parent_dir(index_path)
+    faiss.write_index(index, str(index_path))
+    print(f"Rebuilt index from {yaml_path.name}")
+    print(f"Wrote index: {index_path.name}")
     return 0
 
 
@@ -598,14 +614,22 @@ def command_analyze(
 
 def print_help() -> None:
     print("Usage:")
-    print("  memo [--help] [-v] [-f <file>]")
-    print("  memo save [-f <file>] [-v] <yaml_file>")
-    print("  memo recall [-f <file>] [-v] [-k <N>] [--filter <expr>] <query>")
-    print("  memo analyze [-f <file>] [-v] --filter <expr> [--fields <list>] [--stats <key>] [--limit <N>] [--offset <N>]")
-    print("  memo clean [-f <file>] [-v>")
+    print("  memo --help")
+    print("  memo -f <base> [-v] save <yaml_file>")
+    print("  memo -f <base> [-v] recall [-k <N>] [--filter <expr>] <query>")
+    print("  memo -f <base> [-v] analyze --filter <expr> [--fields <list>] [--stats <key>] [--limit <N>] [--offset <N>]")
+    print("  memo -f <base> [-v] clean")
+    print("  memo -f <base> [-v] reindex")
+    print()
+    print("Commands:")
+    print("  save                Insert/update memory records from YAML input file")
+    print("  recall              Semantic recall from <base>.memo + <base>.yaml")
+    print("  analyze             Metadata-only reporting from <base>.yaml")
+    print("  clean               Remove <base>.memo and <base>.yaml")
+    print("  reindex             Rebuild <base>.memo from <base>.yaml (full regenerate)")
     print()
     print("Options:")
-    print("  [-f <file>]        Optional DB basename (default: memo)")
+    print("  -f <base>           REQUIRED DB basename")
     print("  -v                 Verbose logs to stderr")
     print("  <yaml_file>        YAML file for save input (single or multi-doc using ---)")
     print("                     Each doc requires: metadata: <map>, body: <string>")
@@ -619,7 +643,7 @@ def print_help() -> None:
 
 
 def parse_args(argv: list[str]) -> tuple[dict[str, Any], int]:
-    db_base = DEFAULT_DB
+    db_base: str | None = None
     verbose = False
     positional: list[str] = []
 
@@ -635,6 +659,9 @@ def parse_args(argv: list[str]) -> tuple[dict[str, Any], int]:
                 print("Error: -f requires a value", file=sys.stderr)
                 return {}, 1
             db_base = argv[i + 1]
+            if db_base.strip() == "":
+                print("Error: -f requires a non-empty value", file=sys.stderr)
+                return {}, 1
             i += 2
             continue
         positional.append(arg)
@@ -779,6 +806,10 @@ def main() -> int:
     user_cwd = os.getcwd()
     command = positional[0]
     db_base = parsed["db_base"]
+    if db_base is None:
+        print("Error: -f <base> is required", file=sys.stderr)
+        print_help()
+        return 1
     verbose = parsed["verbose"]
 
     if command == "clean":
@@ -786,6 +817,12 @@ def main() -> int:
             print("Error: clean does not accept extra arguments", file=sys.stderr)
             return 1
         return command_clean(db_base, user_cwd)
+
+    if command == "reindex":
+        if len(positional) != 1:
+            print("Error: reindex does not accept extra arguments", file=sys.stderr)
+            return 1
+        return command_reindex(db_base, user_cwd, verbose)
 
     if command == "save":
         if len(positional) != 2:

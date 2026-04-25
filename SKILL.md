@@ -6,39 +6,53 @@
 
 ```text
 Usage:
-  memo [--help] [-v] [-f <file>]
-  memo save [-f <file>] [-v] <yaml_file>
-  memo recall [-f <file>] [-v] [-k <N>] [--filter <expr>] <query>
-  memo analyze [-f <file>] [-v] --filter <expr> [--fields <list>] [--stats <key>] [--limit <N>] [--offset <N>]
-  memo clean [-f <file>] [-v]
+  memo --help
+  memo -f <base> [-v] save <yaml_file>
+  memo -f <base> [-v] recall [-k <N>] [--filter <expr>] <query>
+  memo -f <base> [-v] analyze --filter <expr> [--fields <list>] [--stats <key>] [--limit <N>] [--offset <N>]
+  memo -f <base> [-v] clean
+  memo -f <base> [-v] reindex
+
+Commands:
+  save                Insert/update memory records from YAML input file
+  recall              Semantic recall from <base>.memo + <base>.yaml
+  analyze             Metadata-only reporting from <base>.yaml
+  clean               Remove <base>.memo and <base>.yaml
+  reindex             Rebuild <base>.memo from <base>.yaml (full regenerate)
 
 Options:
-  [-f <file>]        Optional DB basename (default: memo)
+  -f <base>           REQUIRED DB basename
   -v                 Verbose logs to stderr
   <yaml_file>        YAML file for save input (single or multi-doc using ---)
                      Each doc requires: metadata: <map>, body: <string>
                      Optional per-doc id: <int> to overwrite existing record
   --filter <expr>    Filter recall results by metadata
+  --fields <list>    analyze only: comma-separated columns (e.g. id,source,metadata)
+  --stats <key>      analyze only: cardinality + numeric/date-like range for key
+  --limit <N>        analyze only: max rows to print (default: 100)
+  --offset <N>       analyze only: rows to skip before printing (default: 0)
   --help             Show this help
 ```
 
 ## Core behavior
 
-- `memo` or `memo --help` prints help.
-- `memo save <yaml_file>` is the only supported save input mode.
+- `memo --help` prints help.
+- `-f <base>` is required for all subcommands.
+- `memo -f <base> save <yaml_file>` is the only supported save input mode.
 - YAML input can contain one or many docs (`---` separators).
 - Each YAML doc requires:
   - `body` (non-empty string)
   - optional `metadata` (mapping)
   - optional `id` (non-negative integer) to overwrite an existing record.
-- `memo recall <query>` recalls top matches (default `k=2`).
-- `memo recall -k <N> <query>` recalls top `N` matches (`N` capped at 100).
-- `memo recall --filter '<expr>' <query>` filters on metadata using YAML-flow expressions/operators.
-- `memo analyze --filter '<expr>'` runs metadata-only analysis (no semantic query).
-- `memo analyze --stats <key>` prints cardinality and numeric/date-like range summaries.
-- `memo analyze --fields id,source,...` projects metadata rows without body text.
-- `memo clean` wipes the current DB files (`.memo`, `.yaml`).
-- `-f <file>` changes DB basename; relative paths resolve from process CWD.
+- `memo -f <base> recall <query>` recalls top matches (default `k=2`).
+- `memo -f <base> recall -k <N> <query>` recalls top `N` matches (`N` capped at 100).
+- `memo -f <base> recall --filter '<expr>' <query>` filters on metadata using YAML-flow expressions/operators.
+- `memo -f <base> analyze --filter '<expr>'` runs metadata-only analysis (no semantic query).
+- `memo -f <base> analyze --stats <key>` prints cardinality and numeric/date-like range summaries.
+- `memo -f <base> analyze --fields id,source,...` projects metadata rows without body text.
+- `memo -f <base> clean` wipes the current DB files (`<base>.memo`, `<base>.yaml`).
+- `memo -f <base> reindex` rebuilds `<base>.memo` from `<base>.yaml` without editing YAML.
+- Relative `-f` paths resolve from process CWD.
 - `-v` enables verbose logs to stderr only.
 
 ## Save input format
@@ -84,11 +98,11 @@ body: Updated note text for id 3.
 ### Save + recall
 
 ```bash
-$ memo save /tmp/memo-input.yaml
+$ memo -f memo save /tmp/memo-input.yaml
 Memorized: 'I am allergic to peanuts.' (ID: 0)
 Memorized: 'User prefers dark mode.' (ID: 1)
 
-$ memo recall -k 2 health info
+$ memo -f memo recall -k 2 health info
 Top 2 results for 'health info':
   [1] Score: 0.2300 |
       I am allergic to peanuts.
@@ -97,7 +111,7 @@ Top 2 results for 'health info':
 ### Filtered recall
 
 ```bash
-$ memo recall -k 3 --filter '{source: user}' what do I know about myself
+$ memo -f memo recall -k 3 --filter '{source: user}' what do I know about myself
 Top 3 results for 'what do I know about myself':
   [1] Score: 0.2500 |
       I am allergic to peanuts.
@@ -106,7 +120,7 @@ Top 3 results for 'what do I know about myself':
 ### Analyze
 
 ```bash
-$ memo analyze --filter '{source: user}' --fields id,source,category
+$ memo -f memo analyze --filter '{source: user}' --fields id,source,category
 Matched: 1
 ID  source  category
 0   user    health
@@ -115,8 +129,16 @@ ID  source  category
 ### Clean
 
 ```bash
-$ memo clean
+$ memo -f memo clean
 Cleared memory database (memo.memo, memo.yaml)
+```
+
+### Reindex
+
+```bash
+$ memo -f memo reindex
+Rebuilt index from memo.yaml
+Wrote index: memo.memo
 ```
 
 ## Output contract
@@ -137,7 +159,7 @@ Cleared memory database (memo.memo, memo.yaml)
 
 ## Metadata filtering (embedded reference)
 
-`memo recall --filter '<expr>' <query>` applies deterministic metadata filtering
+`memo -f <base> recall --filter '<expr>' <query>` applies deterministic metadata filtering
 before showing semantic results.
 
 ### Metadata shape (save YAML)
@@ -181,41 +203,41 @@ Both are equivalent.
 Top-level keys are implicitly ANDed:
 
 ```bash
-memo recall --filter 'source: user, priority: {$gte: 2}' urgent user items
+memo -f memo recall --filter 'source: user, priority: {$gte: 2}' urgent user items
 ```
 
 Use `$and` for multiple conditions on the same key:
 
 ```bash
-memo recall --filter '$and: [{ts: {$gte: 2026-01-01}}, {ts: {$lte: 2026-01-31}}]' january memories
+memo -f memo recall --filter '$and: [{ts: {$gte: 2026-01-01}}, {ts: {$lte: 2026-01-31}}]' january memories
 ```
 
 Use `$or` for alternative conditions:
 
 ```bash
-memo recall --filter '$or: [{source: user}, {source: chat}]' user or chat memories
+memo -f memo recall --filter '$or: [{source: user}, {source: chat}]' user or chat memories
 ```
 
 ### Practical examples
 
 ```bash
 # Exact match
-memo recall --filter 'source: chat' what did we talk about
+memo -f memo recall --filter 'source: chat' what did we talk about
 
 # Numeric threshold
-memo recall --filter 'priority: {$gte: 3}' important things
+memo -f memo recall --filter 'priority: {$gte: 3}' important things
 
 # Lexicographic/date threshold
-memo recall --filter 'ts: {$gte: 2026-02-01}' recent events
+memo -f memo recall --filter 'ts: {$gte: 2026-02-01}' recent events
 
 # Prefix
-memo recall --filter 'category: {$prefix: per}' personal items
+memo -f memo recall --filter 'category: {$prefix: per}' personal items
 
 # Array contains
-memo recall --filter 'tags: {$contains: food}' what food do I like
+memo -f memo recall --filter 'tags: {$contains: food}' what food do I like
 
 # Combined conditions
-memo recall --filter 'source: user, category: health, priority: {$gte: 2}' important health
+memo -f memo recall --filter 'source: user, category: health, priority: {$gte: 2}' important health
 ```
 
 ### How filtering is applied

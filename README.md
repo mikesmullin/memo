@@ -9,34 +9,36 @@ FAISS-based reimplementation of `memo`.
 
 ## Goals
 
-- Match existing `memo` CLI commands (`save`, `recall`, `clean`) and output style.
+- Match existing `memo` CLI behaviors and output style while using modern local storage.
 - Use FAISS for vector indexing/search.
-- Replace old save input method with YAML file-only input.
+- Use YAML as the human-readable source of records.
+- Support full index regeneration from YAML.
 
-## Setup
+## What It Is For
+
+`memo` is a local semantic memory utility for:
+
+- storing notes/facts in a YAML-backed database,
+- recalling related notes by semantic similarity,
+- filtering/analyzing records using metadata,
+- rebuilding the vector index from YAML when needed.
+
+## Installation
 
 ```bash
 cd mac
 uv sync
 ```
 
-Or run directly with wrapper:
+## Configuration
 
-```bash
-./memo --help
-```
+- Database basename is explicitly selected per invocation.
+- For basename `<base>`, runtime files are:
+  - `<base>.yaml` (human-readable records)
+  - `<base>.memo` (FAISS index)
+- Relative basenames are resolved from the process working directory.
 
-## CLI
-
-```bash
-memo [--help] [-v] [-f <file>]
-memo save [-f <file>] [-v] <yaml_file>
-memo recall [-f <file>] [-v] [-k <N>] [--filter <expr>] <query>
-memo analyze [-f <file>] [-v] --filter <expr> [--fields <list>] [--stats <key>] [--limit <N>] [--offset <N>]
-memo clean [-f <file>] [-v]
-```
-
-## Save YAML format
+## Record Format (YAML)
 
 Single entry:
 
@@ -72,28 +74,4 @@ metadata:
 body: Updated note for id 3
 ```
 
-## Storage files
-
-Given default db basename `memo` in current working directory:
-
-- `memo.memo` (FAISS index)
-- `memo.yaml` (human-readable records)
-
-## Analyze metadata
-
-Use `analyze` for metadata-only workflows (no semantic embedding/search path):
-
-```bash
-memo analyze --filter '{source: user}'
-memo analyze --filter '{source: user}' --fields id,source,rule,ts
-memo analyze --filter '{source: user}' --stats rule
-memo analyze --filter '{source: user}' --limit 100 --offset 0
-```
-
-Notes:
-
-- `--filter` is required.
-- `--fields` supports `id`, `metadata`, and metadata keys (for example `source` or `metadata.source`).
-- `--stats <key>` prints cardinality and range summary (numeric/date-like when parseable).
-
-Runtime now uses only `.memo + .yaml`.
+For complete command usage, flags, and command input/output examples, see `SKILL.md`.
