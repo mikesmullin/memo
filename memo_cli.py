@@ -323,10 +323,14 @@ def command_reindex(db_base: str, user_cwd: str, verbose: bool) -> int:
     index_path, yaml_path = build_db_paths(db_base, user_cwd)
 
     try:
-        texts, _ = load_yaml_tables(yaml_path)
+        texts, metas = load_yaml_tables(yaml_path)
     except Exception as e:
         print(f"Error: failed to load database YAML '{yaml_path}': {e}", file=sys.stderr)
         return 1
+
+    # Canonicalize YAML formatting on reindex so body always uses block scalar style.
+    ensure_parent_dir(yaml_path)
+    save_yaml_tables(yaml_path, texts, metas)
 
     index = rebuild_index_from_texts(texts, verbose)
     ensure_parent_dir(index_path)
