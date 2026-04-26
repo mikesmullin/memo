@@ -143,6 +143,18 @@ def is_blank_body(text: str | None) -> bool:
     return text is None or normalize_whitespace(text) == ""
 
 
+def is_deleted_record(metadata: dict[str, Any] | None, body: str | None) -> bool:
+    if isinstance(metadata, dict) and bool(metadata.get("deleted")):
+        return True
+    if body is None:
+        return False
+    try:
+        parsed = yaml.safe_load(body)
+    except Exception:
+        return False
+    return isinstance(parsed, dict) and bool(parsed.get("deleted"))
+
+
 def embed_text_hash(text: str, dim: int = DIM) -> np.ndarray:
     normalized = normalize_whitespace(text)
     tokens = re.findall(r"[a-zA-Z0-9_]+", normalized.lower())
@@ -328,15 +340,29 @@ def command_reindex(db_base: str, user_cwd: str, verbose: bool) -> int:
         print(f"Error: failed to load database YAML '{yaml_path}': {e}", file=sys.stderr)
         return 1
 
-    # Canonicalize YAML formatting on reindex so body always uses block scalar style.
-    ensure_parent_dir(yaml_path)
-    save_yaml_tables(yaml_path, texts, metas)
+    # Compact records before rebuild: drop blank/deleted entries and re-sequence IDs.
+    compact_texts: list[str] = []
+    compact_metas: list[dict[str, Any] | None] = []
+    dropped = 0
+    for i, text in enumerate(texts):
+        metadata = metas[i] if i < len(metas) else None
+        if is_blank_body(text) or is_deleted_record(metadata, text):
+            dropped += 1
+            continue
+        compact_texts.append(text)
+        compact_metas.append(metadata)
 
-    index = rebuild_index_from_texts(texts, verbose)
+    # Canonicalize YAML formatting and persist compacted IDs on reindex.
+    ensure_parent_dir(yaml_path)
+    save_yaml_tables(yaml_path, compact_texts, compact_metas)
+
+    index = rebuild_index_from_texts(compact_texts, verbose)
     ensure_parent_dir(index_path)
     faiss.write_index(index, str(index_path))
     print(f"Rebuilt index from {yaml_path.name}")
     print(f"Wrote index: {index_path.name}")
+    if dropped > 0:
+        print(f"Compacted: dropped {dropped} blank/deleted entries")
     return 0
 
 
