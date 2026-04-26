@@ -124,8 +124,17 @@ def normalize(v: np.ndarray) -> np.ndarray:
     return v / n
 
 
+def normalize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def is_blank_body(text: str | None) -> bool:
+    return text is None or normalize_whitespace(text) == ""
+
+
 def embed_text_hash(text: str, dim: int = DIM) -> np.ndarray:
-    tokens = re.findall(r"[a-zA-Z0-9_]+", text.lower())
+    normalized = normalize_whitespace(text)
+    tokens = re.findall(r"[a-zA-Z0-9_]+", normalized.lower())
     vec = np.zeros((dim,), dtype=np.float32)
     for token in tokens:
         h = hash(token)
@@ -239,11 +248,17 @@ def get_existing_ids(index: faiss.IndexIDMap2) -> set[int]:
 
 def rebuild_index_from_texts(texts: list[str | None], verbose: bool) -> faiss.IndexIDMap2:
     idx = create_index()
+    indexed = 0
+    skipped_blank = 0
     for doc_id, text in enumerate(texts):
         note = text or ""
+        if is_blank_body(note):
+            skipped_blank += 1
+            continue
         vec = embed_text_hash(note)
         idx.add_with_ids(vec.reshape(1, -1), np.array([doc_id], dtype=np.int64))
-    vlog(verbose, f"Rebuilt index with {len(texts)} vectors")
+        indexed += 1
+    vlog(verbose, f"Rebuilt index with {indexed} vectors (skipped {skipped_blank} blank records)")
     return idx
 
 
@@ -439,6 +454,8 @@ def command_recall(db_base: str, query: str, k: int, filter_expr: str | None, us
                 continue
 
         text = texts[doc_id] or ""
+        if is_blank_body(text):
+            continue
         print_recall_result_multiline(shown + 1, result.score, text)
         shown += 1
 
