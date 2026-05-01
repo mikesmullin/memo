@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime
+import hashlib
 import os
 import re
 import sys
@@ -155,13 +156,18 @@ def is_deleted_record(metadata: dict[str, Any] | None, body: str | None) -> bool
     return isinstance(parsed, dict) and bool(parsed.get("deleted"))
 
 
+def stable_token_hash(token: str) -> int:
+    digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, byteorder="big", signed=False)
+
+
 def embed_text_hash(text: str, dim: int = DIM) -> np.ndarray:
     normalized = normalize_whitespace(text)
     tokens = re.findall(r"[a-zA-Z0-9_]+", normalized.lower())
     vec = np.zeros((dim,), dtype=np.float32)
     for token in tokens:
-        h = hash(token)
-        idx = abs(h) % dim
+        h = stable_token_hash(token)
+        idx = h % dim
         sign = 1.0 if (h & 1) else -1.0
         vec[idx] += sign
     return normalize(vec).astype(np.float32)
