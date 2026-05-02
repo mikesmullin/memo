@@ -8,6 +8,7 @@
 Usage:
   memo --help
   memo -f <base> [-v] save <yaml_file>
+  memo -f <base> [-v] delete <id> [<id> ...]
   memo -f <base> [-v] recall [-k <N>] [--filter <expr>] <query>
   memo -f <base> [-v] analyze --filter <expr> [--fields <list>] [--stats <key>] [--limit <N>] [--offset <N>]
   memo -f <base> [-v] clean
@@ -15,6 +16,7 @@ Usage:
 
 Commands:
   save                Insert/update memory records from YAML input file
+  delete              Mark one or more record IDs deleted (swept on reindex)
   recall              Semantic recall from <base>.memo + <base>.yaml
   analyze             Metadata-only reporting from <base>.yaml
   clean               Remove <base>.memo and <base>.yaml
@@ -39,6 +41,7 @@ Options:
 - `memo --help` prints help.
 - `-f <base>` is required for all subcommands.
 - `memo -f <base> save <yaml_file>` is the only supported save input mode.
+- `memo -f <base> delete <id> [<id> ...]` marks records deleted in YAML without rebuilding the index.
 - YAML input can contain one or many docs (`---` separators).
 - Each YAML doc requires:
   - `body` (non-empty string)
@@ -52,6 +55,7 @@ Options:
 - `memo -f <base> analyze --fields id,source,...` projects metadata rows without body text.
 - `memo -f <base> clean` wipes the current DB files (`<base>.memo`, `<base>.yaml`).
 - `memo -f <base> reindex` rebuilds `<base>.memo` from `<base>.yaml` without editing YAML.
+- Marked-deleted records are hidden from recall/analyze immediately and physically removed on the next `reindex`.
 - Relative `-f` paths resolve from process CWD.
 - `-v` enables verbose logs to stderr only.
 
@@ -131,6 +135,19 @@ ID  source  category
 ```bash
 $ memo -f memo clean
 Cleared memory database (memo.memo, memo.yaml)
+```
+
+### Delete + sweep later
+
+```bash
+$ memo -f memo delete 1 3
+Marked 2 record(s) deleted
+Run 'memo -f <base> reindex' later to sweep deleted records from the index
+
+$ memo -f memo reindex
+Rebuilt index from memo.yaml
+Wrote index: memo.memo
+Compacted: dropped 2 blank/deleted entries
 ```
 
 ### Reindex

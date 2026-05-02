@@ -456,6 +456,46 @@ def command_save(db_base: str, save_yaml_path: str, user_cwd: str, verbose: bool
     return 0
 
 
+def command_delete(db_base: str, ids: list[int], user_cwd: str) -> int:
+    _, yaml_path = build_db_paths(db_base, user_cwd)
+
+    try:
+        texts, metas = load_yaml_tables(yaml_path)
+    except Exception as e:
+        print(f"Error: failed to load database YAML '{yaml_path}': {e}", file=sys.stderr)
+        return 1
+
+    missing_ids = [doc_id for doc_id in ids if doc_id < 0 or doc_id >= len(texts)]
+    if missing_ids:
+        print(
+            "Error: delete ids do not exist: " + ", ".join(str(doc_id) for doc_id in missing_ids),
+            file=sys.stderr,
+        )
+        return 1
+
+    marked = 0
+    already_deleted = 0
+    for doc_id in ids:
+        text = texts[doc_id] if doc_id < len(texts) else None
+        metadata = metas[doc_id] if doc_id < len(metas) else None
+        if is_deleted_record(metadata, text):
+            already_deleted += 1
+            continue
+
+        updated_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        updated_metadata["deleted"] = True
+        metas[doc_id] = updated_metadata
+        marked += 1
+
+    save_yaml_tables(yaml_path, texts, metas)
+
+    print(f"Marked {marked} record(s) deleted")
+    if already_deleted > 0:
+        print(f"Already marked deleted: {already_deleted}")
+    print("Run 'memo -f <base> reindex' later to sweep deleted records from the index")
+    return 0
+
+
 def command_recall(
     db_base: str,
     query: str,
@@ -512,7 +552,8 @@ def command_recall(
                 continue
 
         text = texts[doc_id] or ""
-        if is_blank_body(text):
+        metadata = metas[doc_id] if doc_id < len(metas) else None
+        if is_blank_body(text) or is_deleted_record(metadata, text):
             continue
         if as_yaml:
             yaml_results.append(
@@ -673,8 +714,11 @@ def command_analyze(
 
     matches: list[tuple[int, dict[str, Any]]] = []
     for doc_id in range(len(texts)):
+        text = texts[doc_id] if doc_id < len(texts) else None
         metadata = metas[doc_id] if doc_id < len(metas) and metas[doc_id] is not None else {}
         if not metadata:
+            continue
+        if is_deleted_record(metadata, text):
             continue
         if matches_filter(metadata, active_filter):
             matches.append((doc_id, metadata))
@@ -703,6 +747,7 @@ def print_help() -> None:
     print("Usage:")
     print("  memo --help")
     print("  memo -f <base> [-v] save <yaml_file>")
+    print("  memo -f <base> [-v] delete <id> [<id> ...]")
     print("  memo -f <base> [-v] recall [-k <N>] [--filter <expr>] [--yaml] <query>")
     print("  memo -f <base> [-v] analyze --filter <expr> [--fields <list>] [--stats <key>] [--limit <N>] [--offset <N>]")
     print("  memo -f <base> [-v] clean")
@@ -710,6 +755,7 @@ def print_help() -> None:
     print()
     print("Commands:")
     print("  save                Insert/update memory records from YAML input file")
+    print("  delete              Mark one or more record IDs deleted (swept on reindex)")
     print("  recall              Semantic recall from <base>.memo + <base>.yaml")
     print("  analyze             Metadata-only reporting from <base>.yaml")
     print("  clean               Remove <base>.memo and <base>.yaml")
@@ -721,6 +767,7 @@ def print_help() -> None:
     print("  <yaml_file>        YAML file for save input (single or multi-doc using ---)")
     print("                     Each doc requires: metadata: <map>, body: <string>")
     print("                     Optional per-doc id: <int> to overwrite existing record")
+    print("  <id>              delete only: one or more integer record ids to mark deleted")
     print("  --filter <expr>    Filter recall results by metadata")
     print("  --yaml             recall only: emit YAML results with id, score, body")
     print("  --fields <list>    analyze only: comma-separated columns (e.g. id,source,metadata)")
@@ -886,6 +933,27 @@ def parse_analyze_args(args: list[str]) -> tuple[dict[str, Any], int]:
     }, 0
 
 
+def parse_delete_args(args: list[str]) -> tuple[dict[str, Any], int]:
+    if not args:
+        print("Error: delete requires at least one <id>", file=sys.stderr)
+        return {}, 1
+
+    ids: list[int] = []
+    for arg in args:
+        try:
+            doc_id = int(arg)
+        except ValueError:
+            print(f"Error: delete id '{arg}' is not an integer", file=sys.stderr)
+            return {}, 1
+        if doc_id < 0:
+            print(f"Error: delete id '{arg}' must be >= 0", file=sys.stderr)
+            return {}, 1
+        ids.append(doc_id)
+
+    deduped_ids = list(dict.fromkeys(ids))
+    return {"ids": deduped_ids}, 0
+
+
 def main() -> int:
     parsed, rc = parse_args(sys.argv)
     if rc != 0:
@@ -922,6 +990,12 @@ def main() -> int:
             print("Error: save requires exactly one <yaml_file>", file=sys.stderr)
             return 1
         return command_save(db_base, positional[1], user_cwd, verbose)
+
+    if command == "delete":
+        delete_args, delete_rc = parse_delete_args(positional[1:])
+        if delete_rc != 0:
+            return delete_rc
+        return command_delete(db_base, delete_args["ids"], user_cwd)
 
     if command == "recall":
         recall_args, recall_rc = parse_recall_args(positional[1:])
